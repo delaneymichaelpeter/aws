@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Install GIT and pull down application
+sudo yum install git -y
+git clone https://github.com/christophelimpalair/laravel5-example /home/application
+
+# Install Apache httpd server and start
+echo "Install apache httpd, start and set chkconfig"
+sudo yum install httpd -y
+sleep 10
+sudo service httpd start
+sudo chkconfig httpd on
+
+# Create health check for Load Balancer
+hostName=`curl -sL http://169.254.169.254/latest/meta-data/public-hostname/`
+echo "Create health/index.html for hostname : $hostName"
+sudo mkdir /var/www/html/health/
+echo "Health Check Good from host: $hostName" > /var/www/html/health/index.html
+
+# Tell LifeCycle Hook to Continue
+instanceId=`curl -sL http://169.254.169.254/latest/meta-data/instance-id/`
+regionName=`curl -sL http://169.254.169.254/latest/dynamic/instance-identity/document/ |grep region | awk -F\" '{print $4}'`
+echo "CONTINUE lifecycle hook example_hook for hostname : $instanceId in region : $regionName"
+
+# WAIT TILL GET THE LIFECYCLE HOOK WORKING
+#sleep 2
+#aws autoscaling complete-lifecycle-action --lifecycle-hook-name example_hook --auto-scaling-group-name auto-scaling-group --lifecycle-action-result CONTINUE --region $regionName --instance-id $instanceId
