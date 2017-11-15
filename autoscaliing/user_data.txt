@@ -2,7 +2,7 @@
 
 # Install GIT and pull down application
 sudo yum install git -y
-git clone https://github.com/christophelimpalair/laravel5-example /home/application
+git clone https://github.com/delaneymichaelpeter/aws /home/aws_stuff
 
 # Install Apache httpd server and start
 echo "Install apache httpd, start and set chkconfig"
