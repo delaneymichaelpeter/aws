@@ -62,7 +62,6 @@ done;
 echo "Instance State $state"
 
 
-
 # Create Launch Configuration from EC2 instance
 # Create Launch Configuration from EC2 and Override Instance Type
 launchConfigName=delaney-launch
@@ -91,33 +90,69 @@ aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --l
 echo "Created AutoScaling Group : $asgName"
 
 
-# Delete Resources thus far sleep/wait for resources to get established
-aws ec2 terminate-instances --instance-ids $instanceId
-# Wait for instance to be in running state
-echo "Wait for Instance to be terminated"
-while state=$(aws ec2 describe-instances --instance-ids $instanceId --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" = "shutting-down"; do
-    echo -n . ; sleep 3;
-done;
-echo "Instance State $state"
+echo "###################################"
+echo "##### Begin Deleting Resources #####"
+echo "###################################"
+
 
 echo "Delete AutoScaling Group : $launchName"
 aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $asgName
+sleep 3;
+
+
+echo "Deleted Load Balancer : $elbName"
+aws elb delete-load-balancer  --load-balancer-name $elbName
+echo "Deleted ELB $elbName : $elbName"
+sleep 3;
 
 
 echo "Delete AutoScaling Launch Configuration : $launchName"
 aws autoscaling delete-launch-configuration --launch-configuration-name $launchConfigName
 
-echo "Deleted instanceId : $instanceId"
-aws elb delete-load-balancer  --load-balancer-name $elbName
-echo "Deleted ELB $elbName : $elbName"
 
-sleep 10;
+echo "Instance State $state"
+instanceIdThatsRunning=`aws ec2 describe-instances --output text --query "Reservations[*].Instances[*].InstanceId" --filters "Name=instance-state-name,Values=running"`
+
+# Delete Resources thus far sleep/wait for resources to get established
+aws ec2 terminate-instances --instance-ids $instanceId
+# Wait for instance to be terminated
+echo "Wait for Instance to be terminated"
+while state=$(aws ec2 describe-instances --instance-ids $instanceId --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" != "terminated"; do
+    echo -n . ; sleep 3;
+done;
+echo "Instance $instanceId terminated"
+
+
+
+# Detach Network Interface for the SSH Security Group
+#networkInterfaceForSSH=`aws ec2 describe-network-interfaces --filters Name=group-name,Values=$sshSgName --output text --query "NetworkInterfaces[*].NetworkInterfaceId"`
+#networkInterfaceAttachmentId=`aws ec2 describe-network-interfaces --filters Name=group-name,Values=$sshSgName --output text --query "NetworkInterfaces[*].Attachment.AttachmentId"`
+#echo "Detach Network Interface $networkInterfaceAttachmentId"
+#aws ec2 detach-network-interface --attachment-id $networkInterfaceAttachmentId
+
+#sleep 10;
+# Wait for network interface to be out of use
+#httpNetworkId=`aws ec2 describe-network-interfaces --query "NetworkInterfaces[*].NetworkInterfaceId" --filters "Name=group-name,Values=$httpSgName --output text"`
+#echo "Waiting for Network Interface to be out of use "
+#while state=$(aws ec2 describe-network-interfaces --network-interface-ids $httpNetworkId --output text --query 'NetworkInterfaces[*].Attachment.Status'); test "$state" = "in-use"; do
+#    echo -n . ; sleep 3;
+#done;
+#echo "Network Interface : $httpNetworkId no longer in use delete HTTP Security Group"
+
 aws ec2 delete-security-group --group-name $httpSgName
 echo "Deleted Security Group : $httpSgName"
 
+
+#sshNetworkId=`aws ec2 describe-network-interfaces --query "NetworkInterfaces[*].NetworkInterfaceId" --filters "Name=group-name,Values=$sshSgName --output text"`
+#echo "Waiting for Network Interface to be out of use "
+#while state=$(aws ec2 describe-network-interfaces --network-interface-ids $httpNetworkId --output text --query 'NetworkInterfaces[*].Attachment.Status'); test "$state" = "in-use"; do
+#    echo -n . ; sleep 3;
+#done;
+#echo "Network Interface : $sshNetworkId no longer in use delete SSH Security Group"
+
+
 aws ec2 delete-security-group --group-name $sshSgName
 echo "Deleted Security Group : $sshSgName"
-
 
 
 # Stop Here
