@@ -12,6 +12,7 @@ vpcName=Default-VPC
 httpSgName=delaney-HTTP-SG
 sshSgName=delaney-SSH-SG
 elbName=delaney-ELB
+nameTagValue=autoscaling-test
 myIp=$(curl -sS http://checkip.amazonaws.com/)
 echo "MY IP : $myIp"
 
@@ -42,7 +43,7 @@ echo "SSH Security Group : $sshSgId"
 # Create Load Balancer
 subnetIds=`aws ec2 describe-subnets --filters Name=vpc-id,Values=$vpcId --output text --query 'Subnets[*].SubnetId'`
 subnetId=`aws ec2 describe-subnets --filters Name=vpc-id,Values=$vpcId --output text --query 'Subnets[0].SubnetId'`
-elbDnsName=`aws elb create-load-balancer --load-balancer-name $elbName --listeners "Protocol=HTTP,LoadBalancerPort=80,InstanceProtocol=HTTP,InstancePort=80" --subnets $subnetIds --security-groups $sshSgId --output text --query 'DNSName'`
+elbDnsName=`aws elb create-load-balancer --load-balancer-name $elbName --listeners "Protocol=HTTP,LoadBalancerPort=80,InstanceProtocol=HTTP,InstancePort=80" --subnets $subnetIds --security-groups $httpSgId --output text --query 'DNSName'`
 echo "ELB DNS Name : $elbDnsName"
 
 
@@ -54,6 +55,8 @@ imageId=ami-6057e21a
 instanceId=`aws ec2 run-instances --image $imageId --key $keyPair --security-group-ids $sshSgId $httpSgId --count 1 --instance-type $instanceType --user-data file://user_data.txt --subnet-id $subnetId --output text --query 'Instances[*].InstanceId'`
 echo "Create EC2 Instance : $instanceId for Launch Configuration"
 
+aws ec2 create-tags --resources $instanceId --tags Key=Name,Value="$nameTagValue"
+
 # Wait for instance to be in running state
 echo "Wait for Instance to be running"
 while state=$(aws ec2 describe-instances --instance-ids $instanceId --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" = "pending"; do
@@ -61,8 +64,6 @@ while state=$(aws ec2 describe-instances --instance-ids $instanceId --output tex
 done;
 echo "Instance State $state"
 
-
-# Create Launch Configuration from EC2 instance
 # Create Launch Configuration from EC2 and Override Instance Type
 launchConfigName=delaney-launch
 aws autoscaling create-launch-configuration --launch-configuration-name $launchConfigName --instance-id $instanceId --instance-type $instanceType
@@ -85,10 +86,16 @@ echo "subnet ids : $firstSubnetId"
 
 # Go to sleep seems to have problems
 sleep 10; 
-aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $firstSubnetId --load-balancer-names $elbName --max-size 0 --min-size 0 --desired-capacity 0 --health-check-type ELB --health-check-grace-period 120
-
+aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $firstSubnetId --load-balancer-names $elbName --max-size 2 --min-size 1 --desired-capacity 1 --health-check-type ELB --health-check-grace-period 30
 echo "Created AutoScaling Group : $asgName"
 
+# Create lifecycle hook on LAUNCH
+launchHookName=delaney-launch-hook
+aws autoscaling put-lifecycle-hook --lifecycle-hook-name $launchHookName --auto-scaling-group-name $asgName --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING
+echo "Created LifeCycle Hook : $launchHookName"
+
+# STOP HERE
+exit 1
 
 echo "###################################"
 echo "##### Begin Deleting Resources #####"
@@ -143,12 +150,12 @@ aws ec2 delete-security-group --group-name $httpSgName
 echo "Deleted Security Group : $httpSgName"
 
 
-#sshNetworkId=`aws ec2 describe-network-interfaces --query "NetworkInterfaces[*].NetworkInterfaceId" --filters "Name=group-name,Values=$sshSgName --output text"`
-#echo "Waiting for Network Interface to be out of use "
-#while state=$(aws ec2 describe-network-interfaces --network-interface-ids $httpNetworkId --output text --query 'NetworkInterfaces[*].Attachment.Status'); test "$state" = "in-use"; do
-#    echo -n . ; sleep 3;
-#done;
-#echo "Network Interface : $sshNetworkId no longer in use delete SSH Security Group"
+sshNetworkId=`aws ec2 describe-network-interfaces --query "NetworkInterfaces[*].NetworkInterfaceId" --filters "Name=group-name,Values=$sshSgName --output text"`
+echo "Waiting for Network Interface to be out of use "
+while state=$(aws ec2 describe-network-interfaces --network-interface-ids $httpNetworkId --output text --query 'NetworkInterfaces[*].Attachment.Status'); test "$state" = "in-use"; do
+    echo -n . ; sleep 3;
+done;
+echo "Network Interface : $sshNetworkId no longer in use delete SSH Security Group"
 
 
 aws ec2 delete-security-group --group-name $sshSgName
@@ -185,17 +192,9 @@ aws elb attach-load-balancer-to-subnets --load-balancer-name delaney-elb --subne
 
 
 
-
-# Create lifecycle hook on Startup
-
-
 # Add Health Check to AutoScaling Group
 aws autoscaling update-auto-scaling-group --auto-scaling-group-name delaney-asg --health-check-type ELB --health-check-grace-period 300
 
-
-# Attach/Detach running EC2 instance to AutoScaling Group
-aws autoscaling attach-instances --instance-ids i-a8d09d9c --auto-scaling-group-name delaney-asg
-aws autoscaling detach-instances --instance-ids i-a8d09d9c --auto-scaling-group-name delaney-asg --should-decrement-desired-capacity
 
 # Put Step Scaling Policy to AutoScaling Group
 aws autoscaling put-scaling-policy --policy-name delaney-scale-policy --auto-scaling-group-name delaney-asg --scaling-adjustment 30 --adjustment-type PercentChangeInCapacity

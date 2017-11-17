@@ -18,10 +18,10 @@ sudo mkdir /var/www/html/health/
 echo "Health Check Good from host: $hostName" > /var/www/html/health/index.html
 
 # Tell LifeCycle Hook to Continue
+# 'delaney-launch-hook' and 'delaney-ASG' are defined in autoscaling.sh  Need way of grabbing from this script
+hookName=delaney-launch-hook
+asgName=delaney-ASG
 instanceId=`curl -sL http://169.254.169.254/latest/meta-data/instance-id/`
 regionName=`curl -sL http://169.254.169.254/latest/dynamic/instance-identity/document/ |grep region | awk -F\" '{print $4}'`
-echo "CONTINUE lifecycle hook example_hook for hostname : $instanceId in region : $regionName"
-
-# WAIT TILL GET THE LIFECYCLE HOOK WORKING
-#sleep 2
-#aws autoscaling complete-lifecycle-action --lifecycle-hook-name example_hook --auto-scaling-group-name auto-scaling-group --lifecycle-action-result CONTINUE --region $regionName --instance-id $instanceId
+echo "CONTINUE lifecycle hook example_hook for hostname : $instanceId in region : $regionName hookName : $hookName autoscaling $asgName"
+aws autoscaling complete-lifecycle-action --lifecycle-hook-name $hookName --auto-scaling-group-name $asgName --lifecycle-action-result CONTINUE --instance-id $instanceId --region $regionName
