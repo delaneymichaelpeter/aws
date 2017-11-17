@@ -57,8 +57,8 @@ echo "Create EC2 Instance : $instanceId for Launch Configuration"
 
 aws ec2 create-tags --resources $instanceId --tags Key=Name,Value="$nameTagValue"
 
-# Wait for instance to be in running state
-echo "Wait for Instance to be running"
+# Waiting for instance to be  running state to can create launch-configuration
+echo "Waiting for Instance to be running to create launch configuration" 
 while state=$(aws ec2 describe-instances --instance-ids $instanceId --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" = "pending"; do
     echo -n . ; sleep 3;
 done;
@@ -94,13 +94,22 @@ launchHookName=delaney-launch-hook
 aws autoscaling put-lifecycle-hook --lifecycle-hook-name $launchHookName --auto-scaling-group-name $asgName --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING
 echo "Created LifeCycle Hook : $launchHookName"
 
-# STOP HERE
-exit 1
+read -e -p "Delete Created Resources? [Y/N]:" answer
+echo "Answer is : $answer"
+if [ $answer == 'n' ] || [ $answer == 'N' ]
+then
+    echo "Existing Script";
+    exit 1
+fi
+    
+
+
 
 echo "###################################"
 echo "##### Begin Deleting Resources #####"
 echo "###################################"
 
+# TODO need to determine if any AutoScaling activities are in play because if they are won't be able to delete the AutoScaling Group
 
 echo "Delete AutoScaling Group : $launchName"
 aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $asgName
