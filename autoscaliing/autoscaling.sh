@@ -13,6 +13,10 @@ httpSgName=delaney-HTTP-SG
 sshSgName=delaney-SSH-SG
 elbName=delaney-ELB
 nameTagValue=autoscaling-test
+
+# Important that this exist in the VPC/Region 
+autoscalingHooksRoleProfile="arn:aws:iam::213240414725:instance-profile/AutoScaling_Hooks_Role"
+
 myIp=$(curl -sS http://checkip.amazonaws.com/)
 echo "MY IP : $myIp"
 
@@ -21,9 +25,6 @@ echo "MY IP : $myIp"
 vpcId=`aws ec2 describe-vpcs --output text --query 'Vpcs[0].VpcId'`
 echo "Using VPC : $vpcId"
 
-# Another way
-#vpcId=`aws ec2 describe-vpcs --filters Name=tag-key,Values=vpcname --filters Name=tag-value,Values=$vpcName --output text --query 'Vpcs[*].VpcId'`
-#echo "Described VPC : $vpcId"
 
 # Create Security Group for HTTP and SSH
 httpSgId=`aws ec2 create-security-group --group-name $httpSgName --description "Security to allow HTTP traffic" --vpc-id $vpcId --output text --query 'GroupId'`
@@ -54,8 +55,7 @@ imageId=ami-6057e21a
 
 instanceId=`aws ec2 run-instances --image $imageId --key $keyPair --security-group-ids $sshSgId $httpSgId --count 1 --instance-type $instanceType --user-data file://user_data.txt --subnet-id $subnetId --output text --query 'Instances[*].InstanceId'`
 echo "Create EC2 Instance : $instanceId for Launch Configuration"
-
-aws ec2 create-tags --resources $instanceId --tags Key=Name,Value="$nameTagValue"
+aws ec2 create-tags --resources $instanceId --tags Key=Name,Value="launch-config-instance"
 
 # Waiting for instance to be  running state to can create launch-configuration
 echo "Waiting for Instance to be running to create launch configuration" 
@@ -66,7 +66,7 @@ echo "Instance State $state"
 
 # Create Launch Configuration from EC2 and Override Instance Type
 launchConfigName=delaney-launch
-aws autoscaling create-launch-configuration --launch-configuration-name $launchConfigName --instance-id $instanceId --instance-type $instanceType
+aws autoscaling create-launch-configuration --launch-configuration-name $launchConfigName --instance-id $instanceId --instance-type $instanceType --iam-instance-profile $autoscalingHooksRoleProfile
 
 # Describe your launch configuration
 echo "#############################################"
@@ -89,13 +89,17 @@ sleep 10;
 aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $firstSubnetId --load-balancer-names $elbName --max-size 2 --min-size 1 --desired-capacity 1 --health-check-type ELB --health-check-grace-period 30
 echo "Created AutoScaling Group : $asgName"
 
+# Assign Tags to instances that autoscaling creates
+aws autoscaling create-or-update-tags --tags "ResourceId=$asgName,ResourceType=auto-scaling-group,Key=environment,Value=autoscale-testing,PropagateAtLaunch=true"
+
+# Add a Policy to AutoScaling Group
+
 # Create lifecycle hook on LAUNCH
 launchHookName=delaney-launch-hook
 aws autoscaling put-lifecycle-hook --lifecycle-hook-name $launchHookName --auto-scaling-group-name $asgName --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING
 echo "Created LifeCycle Hook : $launchHookName"
 
 read -e -p "Delete Created Resources? [Y/N]:" answer
-echo "Answer is : $answer"
 if [ $answer == 'n' ] || [ $answer == 'N' ]
 then
     echo "Existing Script";
@@ -128,6 +132,7 @@ aws autoscaling delete-launch-configuration --launch-configuration-name $launchC
 
 echo "Instance State $state"
 instanceIdThatsRunning=`aws ec2 describe-instances --output text --query "Reservations[*].Instances[*].InstanceId" --filters "Name=instance-state-name,Values=running"`
+echo "Instances that are running : $instanceIdThatsRunning"
 
 # Delete Resources thus far sleep/wait for resources to get established
 aws ec2 terminate-instances --instance-ids $instanceId
