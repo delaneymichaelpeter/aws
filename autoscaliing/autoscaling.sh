@@ -77,10 +77,13 @@ echo "#############################################"
 
 # Create AutoScaling Group
 asgName=delaney-ASG
+asgPolicyUp=delaney-PolicyUp
+asgPolicyDown=delaney-PolicyDown
 
 subnetNames=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].AvailabilityZone'`
 echo "subnet Names : $subnetNames"
 # only takes one subnet, not sure why
+subnetIds=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].SubnetId'`
 firstSubnetId=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[0].SubnetId'`
 echo "subnet ids : $firstSubnetId"
 
@@ -89,10 +92,22 @@ sleep 10;
 aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $firstSubnetId --load-balancer-names $elbName --max-size 2 --min-size 1 --desired-capacity 1 --health-check-type ELB --health-check-grace-period 30
 echo "Created AutoScaling Group : $asgName"
 
+# Add Availability Zones to AutoScaling
+aws autoscaling update-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $subnetIds --max-size 2 --min-size 1 --desired-capacity 1
+echo "Added Subnets to Availability Zone"
+
+
+
 # Assign Tags to instances that autoscaling creates
 aws autoscaling create-or-update-tags --tags "ResourceId=$asgName,ResourceType=auto-scaling-group,Key=environment,Value=autoscale-testing,PropagateAtLaunch=true"
 
-# Add a Policy to AutoScaling Group
+# Add a Scale Up Policy to AutoScaling Group
+aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyUp --adjustment-type ChangeInCapacity --scaling-adjustment 1 --cooldown 150
+echo "Create AutoScaling Up Policy : $asgPolicyUp"
+
+aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyDown --adjustment-type ChangeInCapacity --scaling-adjustment -1 --cooldown 150
+echo "Create AutoScaling Up Policy : $asgPolicyUp"
+
 
 # Create lifecycle hook on LAUNCH
 launchHookName=delaney-launch-hook

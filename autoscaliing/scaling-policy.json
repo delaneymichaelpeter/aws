@@ -1,0 +1,14 @@
+{
+  "AdjustmentType": "ChangeInCapacity"|"PercentChangeInCapacity"|"ExactCapacity",
+  "StepAdjustments": [
+    {
+      "MetricIntervalLowerBound": double,
+      "MetricIntervalUpperBound": double,
+      "ScalingAdjustment": integer
+    }
+    ...
+  ],
+  "MinAdjustmentMagnitude": integer,
+  "Cooldown": integer,
+  "MetricAggregationType": "Average"|"Minimum"|"Maximum"
+}
