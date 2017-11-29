@@ -27,8 +27,11 @@ echo "##### Begin Deleting Resources #####"
 echo "###################################"
 
 
-echo "Delete AutoScaling Group : $launchName"
-aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $asgName
+instanceIdThatsRunning=`aws ec2 describe-instances --output text --query "Reservations[*].Instances[*].InstanceId" --filters "Name=instance-state-name,Values=running"`
+echo "Instances That are running : $instanceIdThatsRunning"
+
+echo "Delete AutoScaling Group : $asgName force delete instances"
+aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $asgName  --force-delete
 sleep 3;
 
 
@@ -42,19 +45,35 @@ echo "Delete AutoScaling Launch Configuration : $launchName"
 aws autoscaling delete-launch-configuration --launch-configuration-name $launchConfigName
 
 
-echo "Instance State $state"
-instanceIdThatsRunning=`aws ec2 describe-instances --output text --query "Reservations[*].Instances[*].InstanceId" --filters "Name=instance-state-name,Values=running"`
-echo "Instances that are running : $instanceIdThatsRunning"
+#echo "Instance State $state"
+#instanceIdThatsRunning=`aws ec2 describe-instances --output text --query "Reservations[*].Instances[*].InstanceId" --filters "Name=instance-state-name,Values=running"`
+#echo "Instances that are running : $instanceIdThatsRunning"
+
+
 
 # Delete Resources thus far sleep/wait for resources to get established
 aws ec2 terminate-instances --instance-ids $instanceIdThatsRunning
-# Wait for instance to be terminated
-echo "Wait for Instance to be terminated"
-while state=$(aws ec2 describe-instances --instance-ids $instanceIdThatsRunning --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" != "terminated"; do
-    echo -n . ; sleep 3;
-done;
-echo "Instance $instanceId terminated"
 
+
+# Wait for instance to be terminated
+for instanceId in $instanceIdThatsRunning
+do
+	echo "Wait for Termination instanceId : $instanceId"
+	while state=$(aws ec2 describe-instances --instance-ids $instanceId --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" != "terminated"; do
+      echo "$instanceId still not terminated continue waiting!";
+      sleep 3;
+    done;
+    echo "$instanceId terminated continue waiting on next instance"
+done;
+
+
+#echo "Wait for Instance to be terminated"
+#while state=$(aws ec2 describe-instances --instance-ids $instanceIdThatsRunning --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" != "terminated"; do
+#    echo "$instanceIdThatsRunning still not terminated continue";
+#    sleep 3;
+    #echo -n . ; sleep 3;
+#done;
+echo "AutoScaling Instances terminated"
 
 
 aws ec2 delete-security-group --group-name $httpSgName

@@ -12,6 +12,9 @@ vpcName=Default-VPC
 httpSgName=delaney-HTTP-SG
 sshSgName=delaney-SSH-SG
 elbName=delaney-ELB
+asgName=delaney-ASG
+asgPolicyOut=delaney-PolicyOut
+asgPolicyIn=delaney-PolicyIn
 nameTagValue=autoscaling-test
 
 # Important that this exist in the VPC/Region 
@@ -24,6 +27,7 @@ echo "MY IP : $myIp"
 # Get the Default VPC; assumes have one and default is the first returned.  NOT GOOD
 vpcId=`aws ec2 describe-vpcs --output text --query 'Vpcs[0].VpcId'`
 echo "Using VPC : $vpcId"
+
 
 
 # Create Security Group for HTTP and SSH
@@ -76,25 +80,27 @@ echo "#############################################"
 
 
 # Create AutoScaling Group
-asgName=delaney-ASG
-asgPolicyUp=delaney-PolicyUp
-asgPolicyDown=delaney-PolicyDown
 
 subnetNames=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].AvailabilityZone'`
 echo "subnet Names : $subnetNames"
-# only takes one subnet, not sure why
-subnetIds=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].SubnetId'`
+
 firstSubnetId=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[0].SubnetId'`
-echo "subnet ids : $firstSubnetId"
 
 # Go to sleep seems to have problems
-sleep 10; 
-aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $firstSubnetId --load-balancer-names $elbName --max-size 2 --min-size 1 --desired-capacity 1 --health-check-type ELB --health-check-grace-period 30
+sleep 5; 
+aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --load-balancer-names $elbName \
+  --max-size 2 --min-size 1 --desired-capacity 1 --health-check-type ELB --health-check-grace-period 30 \
+  --vpc-zone-identifier $firstSubnetId
 echo "Created AutoScaling Group : $asgName"
 
-# Add Availability Zones to AutoScaling
-aws autoscaling update-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --vpc-zone-identifier $subnetIds --max-size 2 --min-size 1 --desired-capacity 1
-echo "Added Subnets to Availability Zone"
+# Add subnets to AutoScaling
+subnetIds=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].SubnetId'`
+echo "Adding following ids to AutoScaling Group : $subnetIds"
+
+# Need commas between subnetId values
+ids=`echo $subnetIds | sed 's/ /, /g'`
+aws autoscaling update-auto-scaling-group --auto-scaling-group-name $asgName --vpc-zone-identifier "$ids"  
+echo "Added Subnets to AutoScaling Group $asgName subnets : $ids"
 
 
 
@@ -102,17 +108,43 @@ echo "Added Subnets to Availability Zone"
 aws autoscaling create-or-update-tags --tags "ResourceId=$asgName,ResourceType=auto-scaling-group,Key=environment,Value=autoscale-testing,PropagateAtLaunch=true"
 
 # Add a Scale Up Policy to AutoScaling Group
-aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyUp --adjustment-type ChangeInCapacity --scaling-adjustment 1 --cooldown 150
-echo "Create AutoScaling Up Policy : $asgPolicyUp"
+aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyOut \
+ --adjustment-type ChangeInCapacity --scaling-adjustment 1 --cooldown 150
+echo "Create AutoScaling Up Policy : $asgPolicyOut"
 
-aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyDown --adjustment-type ChangeInCapacity --scaling-adjustment -1 --cooldown 150
-echo "Create AutoScaling Up Policy : $asgPolicyUp"
+aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyIn \
+ --adjustment-type ChangeInCapacity --scaling-adjustment -1 --cooldown 150
+echo "Create AutoScaling Up Policy : $asgPolicyIn"
+
+# Create CloudWatch Alarm that we will attach to the Scaling Up Policy
+#cpuUpAlarm=delaney-up-alarm
+#cpuPercent=30
+#aws cloudwatch put-metric-alarm --alarm-name $cpuUpAlarm --alarm-description "Alarm when cpu is greater than 60 percent" --metric-name CPUUtilization \
+#    --namespace AWS/EC2 --statistic Average --period 200 --threshold $cpuPercent --comparison-operator GreaterThanThreshold \
+#    --dimensions "Name=InstanceId,Value
+
+
+# Get ARN for our Scale Up Policy and Scale In Policy
+asgPolicyOutARN=`aws autoscaling describe-policies --auto-scaling-group-name $asgName --policy-names $asgPolicyOut --output text --query "ScalingPolicies[*].PolicyARN"`
+echo "Scaling Out : $asgPolicyOut ARN : $asgPolicyOutARN"
+
+asgPolicyInARN=`aws autoscaling describe-policies --auto-scaling-group-name $asgName --policy-names $asgPolicyIn --output text --query "ScalingPolicies[*].PolicyARN"`
+echo "Scaling In : $asgPolicyOut ARN : $asgPolicyOutARN"
+
+
+# Create CloudWatch Alarm and attach to ScaleOut Policy
+aws cloudwatch put-metric-alarm --alarm-name TESTING --alarm-description "Scale Up" --alarm-actions $asgPolicyOutARN \
+ --comparison-operator GreaterThanThreshold --dimensions "Name=AutoScalingGroupName,Value=$asgName"  \
+ --evaluation-periods 1 --metric-name CPUUtilization --namespace "AWS/EC2" --period 60 --statistic Average --threshold 35 \
+ --unit Percent
 
 
 # Create lifecycle hook on LAUNCH
 launchHookName=delaney-launch-hook
 aws autoscaling put-lifecycle-hook --lifecycle-hook-name $launchHookName --auto-scaling-group-name $asgName --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING
 echo "Created LifeCycle Hook : $launchHookName"
+
+
 
 read -e -p "Delete Created Resources? [Y/N]:" answer
 if [ $answer == 'n' ] || [ $answer == 'N' ]
@@ -130,8 +162,8 @@ echo "###################################"
 
 # TODO need to determine if any AutoScaling activities are in play because if they are won't be able to delete the AutoScaling Group
 
-echo "Delete AutoScaling Group : $launchName"
-aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $asgName
+echo "Delete AutoScaling Group : $asgName force delete"
+aws autoscaling delete-auto-scaling-group --auto-scaling-group-name $asgName  --force-delete
 sleep 3;
 
 
