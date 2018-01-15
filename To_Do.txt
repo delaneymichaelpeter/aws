@@ -1,0 +1,16 @@
+# Items To do
+
+# AutoScaling Tasks
+-) Duplicate script into a CloudFormation
+-) Duplicate script into a Python or Go Script
+
+
+# CloudWatch Task
+-) CloudWatch monitoring can be initiated across your AutoScaling Group, so if you have a group of ec2
+   instances in an autoscaling group you can aggregate the metrics across  the grou. 
+   Need to set this up after understanding CloudMetrics better for better understanding.
+
+ -) Create a CloudWatch Alarm that tells AutoScaling to terminate an EC2 instance and start another one.
+    This would be a good exercise.
+
+ -) 

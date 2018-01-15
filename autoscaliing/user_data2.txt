@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# This script will pull down a python-flask project
+# and start the application. 
+
+# Install GIT and pull down application
+sudo yum install git -y
+git clone https://github.com/delaneymichaelpeter/python-flask-web /home/web-app 
+
+# Install python 
+echo "Install python"
+sudo yum install python -y
+sleep 10
+
+# Install Pip and then Flask
+echo "Install PIP and Flask"
+sudo yum install python-pip -y
+sleep 3
+
+# Install Flask
+sudo pip install flask
+sleep 3
+
+# Start in background python-web.py web server and re-direct output to output.txt
+sudo touch /home/web-app/output.txt
+sudo chmod 666 /home/web-app/output.txt
+/usr/bin/python /home/web-app/python-web.py > /home/web-app/output.txt  2>&1  &
+

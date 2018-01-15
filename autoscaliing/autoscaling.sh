@@ -23,36 +23,41 @@ autoscalingHooksRoleProfile="arn:aws:iam::213240414725:instance-profile/AutoScal
 myIp=$(curl -sS http://checkip.amazonaws.com/)
 echo "MY IP : $myIp"
 
-
+#
 # Get the Default VPC; assumes have one and default is the first returned.  NOT GOOD
+#
 vpcId=`aws ec2 describe-vpcs --output text --query 'Vpcs[0].VpcId'`
 echo "Using VPC : $vpcId"
 
 
-
+#
 # Create Security Group for HTTP and SSH
+#
 httpSgId=`aws ec2 create-security-group --group-name $httpSgName --description "Security to allow HTTP traffic" --vpc-id $vpcId --output text --query 'GroupId'`
 aws ec2 create-tags --resources $httpSgId --tags Key=Name,Value="HTTP to EC2"
 aws ec2 authorize-security-group-ingress --group-name $httpSgName --protocol tcp --port 80 --cidr 0.0.0.0/0
 echo "Http Security Group : $httpSgId"
 
-
+#
 # Create SSH
+#
 sshSgId=`aws ec2 create-security-group --group-name $sshSgName --description "Allows SSH to box" --vpc-id $vpcId --output text --query 'GroupId'`
 aws ec2 create-tags --resources $sshSgId --tags Key=Name,Value="SSH to EC2"
 aws ec2 authorize-security-group-ingress --group-name $sshSgName --protocol tcp --port 22 --cidr 0.0.0.0/0
 #aws ec2 authorize-security-group-ingress --group-name $sshSgName --protocol tcp --port 22 --cidr $myIp/32
 echo "SSH Security Group : $sshSgId"
 
-
+#
 # Create Load Balancer
+#
 subnetIds=`aws ec2 describe-subnets --filters Name=vpc-id,Values=$vpcId --output text --query 'Subnets[*].SubnetId'`
 subnetId=`aws ec2 describe-subnets --filters Name=vpc-id,Values=$vpcId --output text --query 'Subnets[0].SubnetId'`
 elbDnsName=`aws elb create-load-balancer --load-balancer-name $elbName --listeners "Protocol=HTTP,LoadBalancerPort=80,InstanceProtocol=HTTP,InstancePort=80" --subnets $subnetIds --security-groups $httpSgId --output text --query 'DNSName'`
 echo "ELB DNS Name : $elbDnsName"
 
-
+#
 # Create Instance that will be our launch configuration
+#
 instanceType=t2.micro
 aZone=us-east-1a
 imageId=ami-6057e21a
@@ -61,14 +66,18 @@ instanceId=`aws ec2 run-instances --image $imageId --key $keyPair --security-gro
 echo "Create EC2 Instance : $instanceId for Launch Configuration"
 aws ec2 create-tags --resources $instanceId --tags Key=Name,Value="launch-config-instance"
 
+#
 # Waiting for instance to be  running state to can create launch-configuration
+#
 echo "Waiting for Instance to be running to create launch configuration" 
 while state=$(aws ec2 describe-instances --instance-ids $instanceId --output text --query 'Reservations[*].Instances[*].State.Name'); test "$state" = "pending"; do
     echo -n . ; sleep 3;
 done;
 echo "Instance State $state"
 
+#
 # Create Launch Configuration from EC2 and Override Instance Type
+#
 launchConfigName=delaney-launch
 aws autoscaling create-launch-configuration --launch-configuration-name $launchConfigName --instance-id $instanceId --instance-type $instanceType --iam-instance-profile $autoscalingHooksRoleProfile
 
@@ -78,36 +87,45 @@ echo "Created Launch Configuration : $launchConfigName"
 aws autoscaling describe-launch-configurations --launch-configuration-names $launchConfigName
 echo "#############################################"
 
-
+#
 # Create AutoScaling Group
-
+#
 subnetNames=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].AvailabilityZone'`
 echo "subnet Names : $subnetNames"
 
 firstSubnetId=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[0].SubnetId'`
 
+#
 # Go to sleep seems to have problems
+#
 sleep 5; 
 aws autoscaling create-auto-scaling-group --auto-scaling-group-name $asgName --launch-configuration-name $launchConfigName --load-balancer-names $elbName \
   --max-size 2 --min-size 1 --desired-capacity 1 --health-check-type ELB --health-check-grace-period 30 \
   --vpc-zone-identifier $firstSubnetId
 echo "Created AutoScaling Group : $asgName"
 
+#
 # Add subnets to AutoScaling
+#
 subnetIds=`aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcId" --output text --query 'Subnets[*].SubnetId'`
 echo "Adding following ids to AutoScaling Group : $subnetIds"
 
+#
 # Need commas between subnetId values
+#
 ids=`echo $subnetIds | sed 's/ /, /g'`
 aws autoscaling update-auto-scaling-group --auto-scaling-group-name $asgName --vpc-zone-identifier "$ids"  
 echo "Added Subnets to AutoScaling Group $asgName subnets : $ids"
 
 
-
+#
 # Assign Tags to instances that autoscaling creates
+#
 aws autoscaling create-or-update-tags --tags "ResourceId=$asgName,ResourceType=auto-scaling-group,Key=environment,Value=autoscale-testing,PropagateAtLaunch=true"
 
+#
 # Add a Scale Up Policy to AutoScaling Group
+#
 aws autoscaling put-scaling-policy --auto-scaling-group-name $asgName --policy-name $asgPolicyOut \
  --adjustment-type ChangeInCapacity --scaling-adjustment 1 --cooldown 150
 echo "Create AutoScaling Up Policy : $asgPolicyOut"
@@ -124,7 +142,9 @@ echo "Create AutoScaling Up Policy : $asgPolicyIn"
 #    --dimensions "Name=InstanceId,Value
 
 
+#
 # Get ARN for our Scale Up Policy and Scale In Policy
+#
 asgPolicyOutARN=`aws autoscaling describe-policies --auto-scaling-group-name $asgName --policy-names $asgPolicyOut --output text --query "ScalingPolicies[*].PolicyARN"`
 echo "Scaling Out : $asgPolicyOut ARN : $asgPolicyOutARN"
 
@@ -132,14 +152,18 @@ asgPolicyInARN=`aws autoscaling describe-policies --auto-scaling-group-name $asg
 echo "Scaling In : $asgPolicyOut ARN : $asgPolicyOutARN"
 
 
+#
 # Create CloudWatch Alarm and attach to ScaleOut Policy
+#
 aws cloudwatch put-metric-alarm --alarm-name TESTING --alarm-description "Scale Up" --alarm-actions $asgPolicyOutARN \
  --comparison-operator GreaterThanThreshold --dimensions "Name=AutoScalingGroupName,Value=$asgName"  \
  --evaluation-periods 1 --metric-name CPUUtilization --namespace "AWS/EC2" --period 60 --statistic Average --threshold 35 \
  --unit Percent
 
 
+#
 # Create lifecycle hook on LAUNCH
+#
 launchHookName=delaney-launch-hook
 aws autoscaling put-lifecycle-hook --lifecycle-hook-name $launchHookName --auto-scaling-group-name $asgName --lifecycle-transition autoscaling:EC2_INSTANCE_LAUNCHING
 echo "Created LifeCycle Hook : $launchHookName"
@@ -290,7 +314,7 @@ aws autoscaling complete-lifecycle-action --lifecycle-action-result CONTINUE --l
 aws autoscaling enter-standby --instance-id i-xxxxxx --auto-scaling-group-name delaney-asg --should-decrement-desired-capacity
 aws autoscaling exit-standby --instance-id i-xxxxxx --auto-scaling-group-name delaney-asg
 
-# Suspend AutoScaling Processs (Launch,Terminate,HealthCheck,ReplaceUnhealthy,AZRebalance,AlarmNotification,ScheduledActions,AddToLoadBalancer)
+# Suspend AutoScaling Processs (Launch,Terminate,HealthCheck,ReplaceUnhealthy,AZRebalance,AlarmNotifiggion,ScheduledActions,AddToLoadBalancer)
 aws autoscaling suspend-processes --auto-scaling-group-name delaney-asg --scaling-processes AlarmNotification
 aws autoscaling resume-processes --auto-scaling-group-name delaney-asg --scaling-processes AlarmNotification
 
