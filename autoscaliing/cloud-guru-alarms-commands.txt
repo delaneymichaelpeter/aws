@@ -1,0 +1,32 @@
+aws cloudwatch put-metric-alarm \
+--alarm-name TimeAlarm \
+--alarm-description "Alert at a certain time" \
+--metric-name "CurrentUnixTime" \
+--namespace "CloudGuru" \
+--statistic "Average" \
+--period 60 \
+--threshold 1452766201.0 \
+--comparison-operator GreaterThanOrEqualToThreshold \
+--evaluation-periods 1 \
+--alarm-actions "arn:aws:sns:us-west-2:577224226475:Cloudguru"
+
+----
+
+aws autoscaling create-launch-configuration --launch-configuration-name my-lc --image-id ami-5583d42f --instance-type m1.medium --key-name pdelaney
+
+
+aws autoscaling create-auto-scaling-group --auto-scaling-group-name my-asg --launch-configuration-name my-lc --max-size 5 --min-size 1 --availability-zones "us-east-1a"
+
+aws autoscaling put-scaling-policy --policy-name my-scaleout-policy --auto-scaling-group-name my-asg --scaling-adjustment 30 --adjustment-type PercentChangeInCapacity
+
+aws autoscaling put-scaling-policy --policy-name my-scalein-policy --auto-scaling-group-name my-asg --scaling-adjustment -2 --adjustment-type ChangeInCapacity
+
+aws cloudwatch put-metric-alarm --alarm-name AddCapacity --metric-name CPUUtilization --namespace AWS/EC2 \
+--statistic Average --period 60 --threshold 80 --comparison-operator GreaterThanOrEqualToThreshold  \
+--dimensions "Name=AutoScalingGroupName,Value=my-asg" --evaluation-periods 2 --alarm-actions PolicyARN
+
+aws cloudwatch put-metric-alarm --alarm-name RemoveCapacity --metric-name CPUUtilization --namespace AWS/EC2 \
+--statistic Average --period 60 --threshold 40 --comparison-operator LessThanOrEqualToThreshold \
+--dimensions "Name=AutoScalingGroupName,Value=my-asg" --evaluation-periods 2 --alarm-actions PolicyARN
+
+
