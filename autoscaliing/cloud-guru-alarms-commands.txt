@@ -12,7 +12,7 @@ aws cloudwatch put-metric-alarm \
 
 ----
 
-aws autoscaling create-launch-configuration --launch-configuration-name my-lc --image-id ami-5583d42f --instance-type m1.medium --key-name pdelaney
+aws autoscaling create-launch-configuration --launch-configuration-name my-lc --image-id ami-66506c1c --instance-type m1.medium --key-name pdelaney
 
 
 aws autoscaling create-auto-scaling-group --auto-scaling-group-name my-asg --launch-configuration-name my-lc --max-size 5 --min-size 1 --availability-zones "us-east-1a"
