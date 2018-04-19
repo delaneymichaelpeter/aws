@@ -1,0 +1,246 @@
+Description: >-
+  Neo4j on AWS - creates an EC2 Ubuntu machine, EBS volume, static IP address,
+  and deploys the Neo4j Graph Database on it.  **WARNING** This template creates
+  an Amazon EC2 instance. You will be billed for the AWS resources used if you
+  create a stack from this template.
+AWSTemplateFormatVersion: 2010-09-09
+Mappings:
+  AWSRegionArch2AMI:
+    us-east-1:
+      '64' : ami-43a15f3e  # Trying this one 'ami-d05e75b8'
+    us-west-2:
+      '64': ami-5189a661
+    us-west-1:
+      '64': ami-df6a8b9b
+    eu-west-1:
+      '64': ami-47a23a30
+    eu-central-1:
+      '64': ami-accff2b1
+    ap-southeast-1:
+      '64': ami-96f1c1c4
+    ap-southeast-2:
+      '64': ami-69631053
+    ap-northeast-1:
+      '64': ami-936d9d93
+    sa-east-1:
+      '64': ami-4d883350
+Parameters:
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: m3.medium
+    AllowedValues:
+      - m1.medium
+      - m1.large
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - m1.xlarge
+      - m2.xlarge
+      - m2.2xlarge
+      - m2.4xlarge
+      - m3.medium
+      - m3.xlarge
+      - m3.2xlarge
+      - c1.medium
+      - c1.xlarge
+    ConstraintDescription: Must be a valid EC2 instance type.
+  SSHKeyName:
+    Description: >-
+      Name of the SSH key that you will use to access the server (must be on AWS
+      Availability Zone already)
+    Type: String
+  NetworkWhitelist:
+    Description: ' The IP address range that can be used to connect to the Neo4j server (by REST or SSH)'
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+Resources:
+  ElasticIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      InstanceId: !Ref Server
+  Server:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      DisableApiTermination: 'FALSE'
+      ImageId: !FindInMap 
+        - AWSRegionArch2AMI
+        - !Ref 'AWS::Region'
+        - '64'
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref SSHKeyName
+      Monitoring: 'false'
+      SecurityGroups:
+        - !Ref sgNeo4jServer
+      Tags:
+        - Key: Name
+          Value: Neo4j on AWS
+      UserData: !Base64 
+        'Fn::Join':
+          - ''
+          - - |
+              #!/bin/bash -v
+            - |
+              # Make the filesystem for the database
+            - |
+              mkdir -p /var/lib/neo4j
+            - |
+              mkfs.ext4 /dev/xvdj
+            - |
+              mount /dev/xvdj /var/lib/neo4j
+            - |
+              apt-get update -y
+            - |
+              # Install openjre version 8
+            - |
+              apt-get install default-jre default-jre-headless -y 
+            - |
+              wget --no-check-certificate -O - https://debian.neo4j.org/neotechnology.gpg.key | sudo apt-key add -
+            - |
+              apt-get update -y
+            - |
+              apt-get install -y neo4j haproxy
+            - |
+              cat <<EOF > /etc/haproxy/haproxy.cfg
+            - |
+              global
+            - |2
+                  daemon
+            - |2
+                  maxconn 256
+            - |+
+
+            - |
+              defaults
+            - |2
+                  mode http
+            - |2
+                  timeout connect 5000ms
+            - |2
+                  timeout client 50000ms
+            - |2
+                  timeout server 50000ms
+            - ''
+            - |
+              frontend http-in
+            - |2
+                  bind *:80
+            - |2
+                  default_backend neo4j
+            - ''
+            - |+
+
+            - |
+              backend neo4j
+            - |2
+                  server s1 127.0.0.1:7474 maxconn 32
+            - |+
+
+            - |
+              listen admin
+            - |2
+                  bind *:8080
+            - |2
+                  stats enable
+            - |
+              EOF
+            - |
+              # install the packages 
+            - |
+              # tweak the config
+            - |
+              sed -i 's/ENABLED=0/ENABLED=1/' /etc/default/haproxy
+            - >
+              echo 'wrapper.java.additional=-Dneo4j.ext.udc.source=ec2neo' >>
+              /etc/neo4j/neo4j-wrapper.conf
+            - |
+              service neo4j-service restart
+            - |
+              service haproxy restart
+            - |
+              cat <<EOF > /etc/cron.daily/neo4j_backup
+            - |
+              #!/bin/bash
+            - |
+              set -e
+            - |
+              backup_dir='/var/tmp/neo4j_backup'
+            - |
+              backup_archive='/mnt'
+            - |
+              neo4j-backup --from single://localhost -to \${backup_dir}
+            - >
+              tar -czf \${backup_archive}//neo4j_backup.\$(date +%FT%T).tgz
+              \${backup_dir}
+            - |
+              rm -rf \${backup_dir}
+            - |
+              EOF
+            - |
+              chown root:root /etc/cron.daily/neo4j_backup
+            - |
+              chmod 0755 /etc/cron.daily/neo4j_backup
+      Volumes:
+        - VolumeId: !Ref EBSVolume
+          Device: /dev/sdj
+  EBSVolume:
+    Type: 'AWS::EC2::Volume'
+    Properties:
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      Size: '100'
+  sgNeo4jServer:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Neo4j Ports
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Ref NetworkWhitelist
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: !Ref NetworkWhitelist
+Outputs:
+  Neo4jWebadmin:
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt 
+          - Server
+          - PublicIp
+    Description: This is the address of your Neo4j server web administration console.
+  Neo4jEndPoint:
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt 
+          - Server
+          - PublicIp
+        - /db/data/
+    Description: 'This is the address of your Neo4j server, that your application will use.'
+  SshAccess:
+    Value: !Join 
+      - ''
+      - - 'ssh -i ${HOME}/.ssh/'
+        - !Ref SSHKeyName
+        - '.pem -l ubuntu '
+        - !GetAtt 
+          - Server
+          - PublicIp
+    Description: This is how you gain remote access to the machine.
+  Note:
+    Value: >-
+      It takes a few minutes for your EC2 machine to finish booting and start
+      Neo4j.  Coffee time?
+    Description: ''
+

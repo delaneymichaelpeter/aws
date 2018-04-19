@@ -1,0 +1,48 @@
+#
+# This template creates an EC2 Instance with an Associated Security Group that allows HTTP/s and SSH 
+# traffic into it.
+# Does this by attaching Security Group directly to the EC2 Instances versus to Network Interface
+#
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template Built using AWS CloudFormer
+Parameters:
+  VPC:
+   Type: "AWS::EC2::VPC::Id"
+   Description: Select the VPC to deploy in
+  Subnet:
+   Type: "AWS::EC2::Subnet::Id"
+   Description: ID of the existing Subnet
+Resources:
+  WebEC2Instance:
+    Type: 'AWS::EC2::Instance'  
+    Properties:
+      DisableApiTermination: 'false'
+      InstanceInitiatedShutdownBehavior: stop
+      ImageId: ami-d874e0a0
+      InstanceType: t2.micro
+      KeyName: CFN-Key
+      Monitoring: 'false'
+      SecurityGroupIds:
+        - !Ref WebSecurityGroup
+      Tags:
+        - Key: name
+          Value: created-via-ec2-sg-template2
+  # Security Group to allow HTTP, HTTPS and SSH traffic through
+  WebSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group allows ssh, http and https traffic into instance
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: 'tcp'
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: '0.0.0.0/0'
+        - IpProtocol: 'tcp'
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: '0.0.0.0/0'
+      
+      
+
+
